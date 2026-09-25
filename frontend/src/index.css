@@ -1,0 +1,134 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'PingFang SC', 'Microsoft YaHei', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: #f5f7fa;
+  color: #333;
+}
+
+:root {
+  --indigo-deep: #1e3a5f;
+  --indigo-primary: #2d5a87;
+  --indigo-light: #3d6e99;
+  --indigo-pale: #e8f0f8;
+  --text-primary: #1a1a1a;
+  --text-secondary: #666;
+  --bg-primary: #ffffff;
+  --bg-secondary: #f5f7fa;
+  --border-color: #e0e0e0;
+}
+
+.indigo-gradient {
+  background: linear-gradient(135deg, var(--indigo-deep) 0%, var(--indigo-primary) 100%);
+}
+
+.pattern-card {
+  transition: all 0.3s ease;
+}
+
+.pattern-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 25px rgba(30, 58, 95, 0.15);
+}
+
+.dye-swatch {
+  width: 60px;
+  height: 60px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.section-title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--indigo-deep);
+  margin-bottom: 16px;
+  padding-left: 12px;
+  border-left: 4px solid var(--indigo-primary);
+}
+
+.markdown-content {
+  line-height: 1.8;
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3 {
+  color: var(--indigo-deep);
+  margin-top: 24px;
+  margin-bottom: 12px;
+}
+
+.markdown-content p {
+  margin-bottom: 12px;
+}
+
+.markdown-content ul,
+.markdown-content ol {
+  padding-left: 24px;
+  margin-bottom: 12px;
+}
+
+.markdown-content li {
+  margin-bottom: 6px;
+}
+
+.markdown-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0;
+}
+
+.markdown-content th,
+.markdown-content td {
+  padding: 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.markdown-content th {
+  background: var(--bg-secondary);
+  font-weight: 600;
+  color: var(--indigo-deep);
+}
+
+.speaker-designer {
+  color: #e74c3c;
+  font-weight: 500;
+}
+
+.speaker-dyer {
+  color: #27ae60;
+  font-weight: 500;
+}
+
+.speaker-artisan {
+  color: #f39c12;
+  font-weight: 500;
+}
+
+.speaker-other {
+  color: var(--indigo-primary);
+  font-weight: 500;
+}
+
+.upload-zone {
+  border: 2px dashed var(--indigo-light);
+  border-radius: 8px;
+  padding: 40px;
+  text-align: center;
+  background: var(--indigo-pale);
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.upload-zone:hover {
+  border-color: var(--indigo-primary);
+  background: #d4e4f2;
+}
