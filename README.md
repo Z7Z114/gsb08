@@ -156,15 +156,56 @@ cd backend && python -m pytest -q
     以及 `POST /api/cost-calculator` 的合法输入、`POST /api/process-meeting` 的顺利路径必须保持可用。
 20. `data_store` 的 JSON 存储语义不变：会议按最新在前插入，图案库 / 染料库缺文件时按默认数据初始化。
 
-## 已知问题（现象举例，不完整）
+## 变更说明
 
-- 上传会议时如果 `designData` 传了不合法的 JSON，接口直接报 500。
-- 预计算成本时数量填 0 会报 500；填负数会算出一串负的成本和负的零售价。
-- OpenAI 调用失败（比如限流）时，页面却显示处理成功，生成的还是模板摘要。
-- 同一条录音处理两次，识别出的扎结手法标签顺序每次都不一样。
-- 会议历史页点「发送邮件」，页面直接报错，邮件也没发出去。
-- 服务器临时目录里越积越多 `*_denoised.wav` 垃圾文件。
-- 邮件服务没配好时，接口依然提示"已发送给买手店"。
+本次修复以「行为规格」为验收标准，逐条修正了以下缺陷（根因 → 修法）：
+
+1. **请求校验缺失导致 500/415**
+   - 根因：`process-meeting` 直接 `json.loads(designData)`，非法 JSON 抛 `JSONDecodeError` 变 500；
+     `send-email` / `cost-calculator` 直接用 `request.json`，非法 body 落到框架默认 415 或 `AttributeError` 变 500。
+   - 修法：新增 `_parse_json_body()` 统一解析（无 body 按 `{}`、非法 JSON/非对象返回 400）；
+     `designData` 解析失败或不是 JSON 对象时返回 400；缺少 `audio` 文件返回 400；未知资源统一 404 + JSON 错误体。
+
+2. **成本核算输入无边界**
+   - 根因：`calculate_cost` 未校验入参，`quantity=0` 触发除零、负数算出负成本、非数值抛 `TypeError`，
+     非法 `fabric_type` / `complexity` 被静默套用默认值。
+   - 修法：新增 `validate_cost_params`（`quantity` 必须为正整数且排除布尔值，`fabric_type` / `complexity`
+     必须落在支持取值内），非法输入抛 `ValueError` 并由路由转为 400；缺省字段按规格默认值
+     （`quantity=1`、`cotton`、`medium`）处理；`process-meeting` 的 `designData` 复用同一校验。
+
+3. **外部服务失败被伪装成成功**
+   - 根因：`generate_summary` 用 `try/except` 吞掉真实 OpenAI 调用的失败并回落模板摘要，
+     429/网络错误时接口照样 200，模板文本被当作正式纪要落库。
+   - 修法：移除吞异常的回落逻辑，真实调用失败直接上抛，由 `process-meeting` 返回错误响应且不落库；
+     未配置 `OPENAI_API_KEY` 的离线摘要保留，但返回结果带 `is_mock: true` 标记。
+     `transcriber` 保持「模型未安装走离线分支、已加载但推理失败上抛」的语义不变。
+
+4. **工艺提取结果不可复现**
+   - 根因：`extract_patterns` 用 `list(set(...))` 去重，顺序依赖哈希随机化；
+     `technique_count` 用的是去重前的列表长度；`dye_count_mentions` 的正则把「染色次数」这类名词也计入。
+   - 修法：改用 `dict.fromkeys` 按首次出现顺序去重；`technique_count = len(tie_methods) + dye_count_mentions`
+     （均为去重后口径）；「染色 N 次」必须带数字才计数。离线说话人划分中 `hash(str(...))` 同样依赖
+     哈希随机化，已改为确定性计算。
+
+5. **临时文件残留**
+   - 根因：`process-meeting` 的 `finally` 只删除上传的原始临时文件，降噪生成的 `*_denoised*` 分片被遗漏。
+   - 修法：统一登记本次处理产生的全部临时路径（原始 + 降噪），`finally` 中无论成功失败都清理。
+
+6. **会议历史页「发送邮件」报错**
+   - 根因：`MeetingHistory.js` 调用了 `message.success/error` 却未从 `antd` 引入 `message`，点击即 `ReferenceError`。
+   - 修法：补上 `message` 引入；其余组件的接口路径与字段名已逐一核对，与后端返回一致。
+
+7. **邮件未投递却返回成功**
+   - 根因：`send_meeting_summary` 在未配置或投递失败时返回 `False`，路由照样 200 返回 `{"success": false}`。
+   - 修法：未配置邮件服务 / 投递失败时抛 `RuntimeError`（路由转 502），收件人为空且无默认收件人时抛
+     `ValueError`（路由转 400），只有确实投递成功才返回 200 + `{"success": true}`。
+
+8. **多条录音只处理第一条**
+   - 根因：`process-meeting` 只取 `request.files['audio']` 的第一个文件。
+   - 修法：改用 `getlist('audio')` 逐条降噪、转写、说话人区分后合并（文本按序拼接、片段依次衔接），
+     再统一提取工艺要素与生成摘要。
+
+同时新增 `backend/tests/test_spec.py`，按 A–F 各节验收点补齐测试；未修复的实现上 26 个用例失败，修复后全部通过。
 
 ## 技术栈
 

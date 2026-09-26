@@ -13,6 +13,21 @@ except ImportError:
 load_dotenv()
 
 
+# 成本核算口径常量（见 README「行为规格」B 节）
+FABRIC_COST_MAP = {
+    'cotton': 35,
+    'linen': 55,
+    'silk': 120,
+    'wool': 80,
+}
+
+COMPLEXITY_MULTIPLIER_MAP = {
+    'simple': 1.0,
+    'medium': 1.5,
+    'complex': 2.2,
+}
+
+
 class MeetingSummarizer:
     def __init__(self):
         api_key = os.getenv('OPENAI_API_KEY')
@@ -49,24 +64,22 @@ class MeetingSummarizer:
 请用专业但易懂的语言，突出手工扎染的艺术价值和工艺特点。
 """
         
-        try:
-            response = self.client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "你是一位专业的手工艺品开发会议记录员，精通传统扎染工艺和现代设计理念。"},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7
-            )
-            
-            return {
-                'summary': response.choices[0].message.content,
-                'series_theme': self._extract_theme(response.choices[0].message.content),
-                'cost_breakdown': self.calculate_cost(design_data)
-            }
-        except Exception as e:
-            print(f"OpenAI API error: {e}")
-            return self._mock_summary(transcript, design_data, patterns)
+        # 已配置 Key 即真实调用 OpenAI；一旦失败（网络错误 / 429 / 鉴权失败）
+        # 必须向上抛出，由接口层返回错误响应，禁止回落为模板摘要伪装成功。
+        response = self.client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "你是一位专业的手工艺品开发会议记录员，精通传统扎染工艺和现代设计理念。"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7
+        )
+
+        return {
+            'summary': response.choices[0].message.content,
+            'series_theme': self._extract_theme(response.choices[0].message.content),
+            'cost_breakdown': self.calculate_cost(design_data)
+        }
     
     def _format_transcript(self, transcript):
         lines = []
@@ -163,29 +176,51 @@ class MeetingSummarizer:
         return {
             'summary': summary.strip(),
             'series_theme': series_theme,
-            'cost_breakdown': cost
+            'cost_breakdown': cost,
+            'is_mock': True,
         }
-    
-    def calculate_cost(self, params):
+
+    def validate_cost_params(self, params):
+        """校验成本核算入参，非法时抛 ValueError；合法时返回套用了默认值的规范化参数。"""
+        params = params or {}
+
         quantity = params.get('quantity', 1)
+        # bool 是 int 的子类，必须显式排除；浮点数仅接受整数值（如 10.0）
+        if isinstance(quantity, bool) or not isinstance(quantity, (int, float)):
+            raise ValueError('quantity 必须是正整数')
+        if isinstance(quantity, float):
+            if not quantity.is_integer():
+                raise ValueError('quantity 必须是正整数')
+            quantity = int(quantity)
+        if quantity < 1:
+            raise ValueError('quantity 必须是正整数（>= 1）')
+
         fabric_type = params.get('fabric_type', 'cotton')
+        if fabric_type not in FABRIC_COST_MAP:
+            raise ValueError(
+                f"fabric_type 必须是 {'/'.join(FABRIC_COST_MAP)} 之一"
+            )
+
         complexity = params.get('complexity', 'medium')
-        
-        fabric_cost_map = {
-            'cotton': 35,
-            'linen': 55,
-            'silk': 120,
-            'wool': 80
+        if complexity not in COMPLEXITY_MULTIPLIER_MAP:
+            raise ValueError(
+                f"complexity 必须是 {'/'.join(COMPLEXITY_MULTIPLIER_MAP)} 之一"
+            )
+
+        return {
+            'quantity': quantity,
+            'fabric_type': fabric_type,
+            'complexity': complexity,
         }
-        
-        complexity_multiplier = {
-            'simple': 1.0,
-            'medium': 1.5,
-            'complex': 2.2
-        }
-        
-        base_fabric = fabric_cost_map.get(fabric_type, 35)
-        multiplier = complexity_multiplier.get(complexity, 1.5)
+
+    def calculate_cost(self, params):
+        validated = self.validate_cost_params(params)
+        quantity = validated['quantity']
+        fabric_type = validated['fabric_type']
+        complexity = validated['complexity']
+
+        base_fabric = FABRIC_COST_MAP[fabric_type]
+        multiplier = COMPLEXITY_MULTIPLIER_MAP[complexity]
         
         fabric_cost = base_fabric * quantity
         dye_cost = 15 * quantity * multiplier

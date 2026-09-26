@@ -135,7 +135,8 @@ class MeetingTranscriber:
         speaker_idx = 0
         
         while current_time < duration:
-            seg_duration = min(30 + (hash(str(current_time)) % 20), duration - current_time)
+            # 用确定性的伪变化代替 hash()：str 的哈希随进程随机化，会破坏离线分支确定性
+            seg_duration = min(30 + (int(current_time * 10) % 20), duration - current_time)
             segments.append({
                 'start': current_time,
                 'end': current_time + seg_duration,
@@ -206,15 +207,21 @@ class MeetingTranscriber:
     def extract_patterns(self, transcript):
         text = transcript['text']
         
-        dye_count = len(re.findall(r'(染|染色)(\d+)?次', text))
+        # 「染色 N 次」必须带数字才算一次染色次数表述，避免把「染色次数」这类名词误计
+        dye_count = len(re.findall(r'染色?\s*\d+\s*次', text))
         tie_methods = re.findall(r'(扎结|捆扎|缝合|折叠|夹扎|缠绕|打绞)', text)
         
         color_counts = re.findall(r'(靛蓝|蓝色|青色|深蓝|浅蓝|灰蓝|植物染|草木染)', text)
         
+        # dict.fromkeys 按首次出现顺序去重，保证跨进程/跨次运行结果可复现；
+        # 不能用 list(set(...))，其顺序依赖哈希随机化
+        tie_methods = list(dict.fromkeys(tie_methods))
+        color_mentions = list(dict.fromkeys(color_counts))
+
         patterns = {
-            'tie_methods': list(set(tie_methods)),
+            'tie_methods': tie_methods,
             'dye_count_mentions': dye_count,
-            'color_mentions': list(set(color_counts)),
+            'color_mentions': color_mentions,
             'technique_count': len(tie_methods) + dye_count
         }
         

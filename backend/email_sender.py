@@ -21,9 +21,10 @@ class EmailSender:
         if not recipients:
             recipients = self.default_recipients
         
-        if not recipients or not self.user:
-            print("Email configuration incomplete, skipping email send")
-            return False
+        if not recipients:
+            raise ValueError('收件人为空，且未配置默认收件人（EMAIL_RECIPIENTS）')
+        if not self.user or not self.password:
+            raise RuntimeError('邮件服务未配置（EMAIL_USER / EMAIL_PASSWORD 缺失）')
         
         try:
             msg = MIMEMultipart()
@@ -59,8 +60,8 @@ class EmailSender:
             return True
             
         except Exception as e:
-            print(f"Email send failed: {e}")
-            return False
+            # 投递失败必须如实上抛，由接口层返回错误状态码，不得伪装成功
+            raise RuntimeError(f'邮件投递失败：{e}') from e
     
     def _build_html_email(self, meeting, summary_text, cost_breakdown):
         design_data = meeting.get('design_data', {})
