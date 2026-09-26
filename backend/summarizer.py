@@ -14,6 +14,19 @@ load_dotenv()
 
 
 class MeetingSummarizer:
+    FABRIC_COST_MAP = {
+        'cotton': 35,
+        'linen': 55,
+        'silk': 120,
+        'wool': 80,
+    }
+
+    COMPLEXITY_MULTIPLIER = {
+        'simple': 1.0,
+        'medium': 1.5,
+        'complex': 2.2,
+    }
+
     def __init__(self):
         api_key = os.getenv('OPENAI_API_KEY')
         self.client = OpenAI(api_key=api_key) if (api_key and OPENAI_AVAILABLE) else None
@@ -49,24 +62,22 @@ class MeetingSummarizer:
 请用专业但易懂的语言，突出手工扎染的艺术价值和工艺特点。
 """
         
-        try:
-            response = self.client.chat.completions.create(
-                model="gpt-4",
-                messages=[
-                    {"role": "system", "content": "你是一位专业的手工艺品开发会议记录员，精通传统扎染工艺和现代设计理念。"},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.7
-            )
-            
-            return {
-                'summary': response.choices[0].message.content,
-                'series_theme': self._extract_theme(response.choices[0].message.content),
-                'cost_breakdown': self.calculate_cost(design_data)
-            }
-        except Exception as e:
-            print(f"OpenAI API error: {e}")
-            return self._mock_summary(transcript, design_data, patterns)
+        # 已配置 Key 即真实调用 OpenAI；一旦调用失败（网络错误 / 429 / 鉴权失败），
+        # 异常必须向上抛出，绝不允许退回模板摘要伪装成功。
+        response = self.client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "你是一位专业的手工艺品开发会议记录员，精通传统扎染工艺和现代设计理念。"},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7
+        )
+
+        return {
+            'summary': response.choices[0].message.content,
+            'series_theme': self._extract_theme(response.choices[0].message.content),
+            'cost_breakdown': self.calculate_cost(design_data)
+        }
     
     def _format_transcript(self, transcript):
         lines = []
@@ -163,29 +174,39 @@ class MeetingSummarizer:
         return {
             'summary': summary.strip(),
             'series_theme': series_theme,
-            'cost_breakdown': cost
+            'cost_breakdown': cost,
+            'is_mock': True,
         }
     
-    def calculate_cost(self, params):
+    def validate_cost_params(self, params):
+        """校验成本核算入参，返回规范化后的 (quantity, fabric_type, complexity)。
+
+        非法输入抛出 ValueError，由接口层转成 400。
+        """
+        params = params or {}
         quantity = params.get('quantity', 1)
         fabric_type = params.get('fabric_type', 'cotton')
         complexity = params.get('complexity', 'medium')
-        
-        fabric_cost_map = {
-            'cotton': 35,
-            'linen': 55,
-            'silk': 120,
-            'wool': 80
-        }
-        
-        complexity_multiplier = {
-            'simple': 1.0,
-            'medium': 1.5,
-            'complex': 2.2
-        }
-        
-        base_fabric = fabric_cost_map.get(fabric_type, 35)
-        multiplier = complexity_multiplier.get(complexity, 1.5)
+
+        # bool 是 int 的子类，必须单独排除
+        if isinstance(quantity, bool) or not isinstance(quantity, int) or quantity < 1:
+            raise ValueError('quantity 必须是正整数（>= 1）')
+        if fabric_type not in self.FABRIC_COST_MAP:
+            raise ValueError(
+                'fabric_type 必须是以下之一：' + ', '.join(self.FABRIC_COST_MAP)
+            )
+        if complexity not in self.COMPLEXITY_MULTIPLIER:
+            raise ValueError(
+                'complexity 必须是以下之一：' + ', '.join(self.COMPLEXITY_MULTIPLIER)
+            )
+
+        return quantity, fabric_type, complexity
+
+    def calculate_cost(self, params):
+        quantity, fabric_type, complexity = self.validate_cost_params(params)
+
+        base_fabric = self.FABRIC_COST_MAP[fabric_type]
+        multiplier = self.COMPLEXITY_MULTIPLIER[complexity]
         
         fabric_cost = base_fabric * quantity
         dye_cost = 15 * quantity * multiplier

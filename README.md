@@ -156,15 +156,61 @@ cd backend && python -m pytest -q
     以及 `POST /api/cost-calculator` 的合法输入、`POST /api/process-meeting` 的顺利路径必须保持可用。
 20. `data_store` 的 JSON 存储语义不变：会议按最新在前插入，图案库 / 染料库缺文件时按默认数据初始化。
 
-## 已知问题（现象举例，不完整）
+## 变更说明
 
-- 上传会议时如果 `designData` 传了不合法的 JSON，接口直接报 500。
-- 预计算成本时数量填 0 会报 500；填负数会算出一串负的成本和负的零售价。
-- OpenAI 调用失败（比如限流）时，页面却显示处理成功，生成的还是模板摘要。
-- 同一条录音处理两次，识别出的扎结手法标签顺序每次都不一样。
-- 会议历史页点「发送邮件」，页面直接报错，邮件也没发出去。
-- 服务器临时目录里越积越多 `*_denoised.wav` 垃圾文件。
-- 邮件服务没配好时，接口依然提示"已发送给买手店"。
+本次修复以「行为规格」为验收标准，逐条问题记录根因与修法：
+
+1. **`designData` 非法 JSON 报 500**（`app.py`）
+   根因：`json.loads(request.form.get('designData'))` 未捕获 `JSONDecodeError`，异常冒泡成 500。
+   修法：解析失败或解析结果不是 JSON 对象时返回 400 + JSON 错误体；缺省按 `{}` 处理；
+   同时复用 `summarizer.validate_cost_params` 对 `designData` 中的成本字段做取值校验，非法即 400。
+
+2. **成本核算输入边界崩溃**（`summarizer.py` / `app.py`）
+   根因：`calculate_cost` 直接用入参做乘除，`quantity=0` 触发 `ZeroDivisionError`，
+   负数算出负成本，`"abc"` 触发 `TypeError`，非法 `fabric_type` / `complexity` 被静默回退默认值。
+   修法：新增 `validate_cost_params`——`quantity` 必须是正整数（排除布尔）、
+   `fabric_type` / `complexity` 必须在支持集合内，非法抛 `ValueError`；
+   `POST /api/cost-calculator` 捕获后返回 400 + JSON 错误体；缺省字段按规格默认值处理。
+
+3. **JSON 接口落到框架默认 415/500**（`app.py`）
+   根因：`request.json` 在 body 非 JSON 时由 Flask 抛出默认错误。
+   修法：`/api/send-email/<id>` 与 `/api/cost-calculator` 改用 `request.get_json(silent=True)`，
+   body 缺失或非法一律 400 + JSON 错误体；`recipients` 必须是字符串数组。
+
+4. **OpenAI 失败被模板摘要冒充成功**（`summarizer.py` / `app.py`）
+   根因：`generate_summary` 用 `try/except` 吞掉真实调用异常并退回 `_mock_summary`，
+   接口照样 200，模板文本被当正式纪要落库。
+   修法：删除该兜底，真实调用失败时异常上抛；`POST /api/process-meeting` 捕获后返回 502
+   且不落库。未配置 `OPENAI_API_KEY` 的离线分支保留，但返回结果带 `is_mock: True` 标记。
+
+5. **工艺要素顺序不可复现**（`transcriber.py`）
+   根因：`extract_patterns` 用 `list(set(...))` 去重，顺序受哈希随机化影响；
+   `technique_count` 用的是去重前的列表长度。
+   修法：改用 `dict.fromkeys` 按文本首次出现顺序去重；
+   `technique_count = len(tie_methods) + dye_count_mentions`（去重后口径）。
+   顺带修复 `_mock_diarization` 里 `hash(str(...))` 的跨进程不确定性，改为确定性计算。
+
+6. **临时文件残留**（`app.py`）
+   根因：`finally` 只删了上传的临时音频，降噪生成的 `*_denoised*` 分片从未清理。
+   修法：用 `temp_paths` 列表登记本次处理产生的全部临时文件（上传副本 + 降噪分片），
+   `finally` 中无论成功失败逐一删除。
+
+7. **多条录音只处理第一条**（`app.py`）
+   根因：`request.files['audio']` 只取第一个文件。
+   修法：改用 `getlist('audio')`，逐条降噪、转写、说话人分离后按时间轴偏移合并，
+   再统一做工艺提取与摘要，一次处理只落库一条会议。
+
+8. **会议历史页「发送邮件」抛 ReferenceError**（`frontend/src/components/MeetingHistory.js`）
+   根因：组件调用了 `message.success/error` 但未从 `antd` 引入 `message`。
+   修法：在 `antd` 导入中补上 `message`，与其余页面保持一致。
+
+9. **邮件未投递却返回 200**（`app.py`）
+   根因：`/api/send-email/<id>` 无论 `send_meeting_summary` 成败都返回 200。
+   修法：未配置邮件服务或投递失败（返回 `False`）时返回 502 + JSON 错误体；
+   收件人为空仍按规格回退到默认收件人，真正投递成功才返回 `{"success": true}`。
+
+同时补充 `backend/tests/test_behavior.py`，按 A–F 各节规格逐条覆盖上述边界
+（在未修复的实现上 24 条失败，修复后全部通过）；既有 `test_smoke.py` 未改动。
 
 ## 技术栈
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, List, Tag, Typography, Empty, Spin, Button, Space } from 'antd';
+import { Card, List, Tag, Typography, Empty, Spin, Button, Space, message } from 'antd';
 import { HistoryOutlined, EyeOutlined, MailOutlined, CalendarOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
 import { getMeetings, sendEmail } from '../services/api';

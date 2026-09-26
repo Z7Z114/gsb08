@@ -135,7 +135,8 @@ class MeetingTranscriber:
         speaker_idx = 0
         
         while current_time < duration:
-            seg_duration = min(30 + (hash(str(current_time)) % 20), duration - current_time)
+            # 不用 hash()（受 PYTHONHASHSEED 随机化影响），保证跨进程可复现
+            seg_duration = min(30 + (int(current_time) % 20), duration - current_time)
             segments.append({
                 'start': current_time,
                 'end': current_time + seg_duration,
@@ -211,10 +212,14 @@ class MeetingTranscriber:
         
         color_counts = re.findall(r'(靛蓝|蓝色|青色|深蓝|浅蓝|灰蓝|植物染|草木染)', text)
         
+        # 按文本中首次出现的先后去重，保证同一文本多次提取顺序完全一致
+        tie_methods = list(dict.fromkeys(tie_methods))
+        color_mentions = list(dict.fromkeys(color_counts))
+
         patterns = {
-            'tie_methods': list(set(tie_methods)),
+            'tie_methods': tie_methods,
             'dye_count_mentions': dye_count,
-            'color_mentions': list(set(color_counts)),
+            'color_mentions': color_mentions,
             'technique_count': len(tie_methods) + dye_count
         }
         
